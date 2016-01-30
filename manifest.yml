@@ -7,4 +7,4 @@ applications:
   instances: 1
   host: smartplugeandu
   path: .     
-  command: node app.js
+  command: node ./bin/www
