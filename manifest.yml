@@ -1,0 +1,10 @@
+---
+applications:
+- name: SmartPlugEandU
+  framework: node
+  runtime: node08
+  memory: 512M
+  instances: 1
+  host: smartplugeandu
+  path: .     
+  command: node app.js
