@@ -10,7 +10,8 @@
     <meta name="author" content="">
 
     <title>SmartPlugE&U</title>
-
+    
+    <link rel="stylesheet" type="text/css" href="css/style.css">
     <!-- Bootstrap Core CSS -->
     <link href="css/bootstrap.min.css" rel="stylesheet">
 
@@ -24,14 +25,200 @@
     <link href='https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
     <link href='https://fonts.googleapis.com/css?family=Roboto+Slab:400,100,300,700' rel='stylesheet' type='text/css'>
 
+    <script src="src/jquery.js"></script>
+    <script type="text/javascript" src="src/highcharts.js"></script>
+    <script src="src/exporting.js"></script>
+    <script type="text/javascript" src="src/paho.js"></script>
+
+    <script type="text/javascript">
+    //VARIABLES ---------------------------------------------------------------------------------------------------------------
+        var broker = "jbscorner.ddns.net";                                                                  //broker url
+        var port = 9001;                                                                              //port
+        var pubTopic = "/SP/write/status";
+        var subTopic = "/SP/read/all";
+        var tweetTopic = "/SP/write/tweet";                                                              //subscription topic
+        var client = new Messaging.Client(broker, port, "energyPortal" +randomString(10));                       //mq client
+        var power = 0;
+        var status = 0;
+        var mensajeRecibido = false;                                                                  //control de mensajes
+        var arrayMedidas;
+        
+    //FUNCTIONS --------------------------------------------------------------------------------------------------------------
+        //Communication-------------------------------------------------------------------------------------------------------
+            //On connection lost            
+            client.onConnectionLost = function (responseObject) {
+                document.getElementById('JB4').style.color='red';
+                client.connect(options);
+                setTimeout(function() {client.subscribe(subTopic, {qos: 2});},2000);
+            };
+            //On message arrived
+            client.onMessageArrived = function (message) {
+                arrayMedidas = message.payloadString.split(";");
+                power = parseFloat(arrayMedidas[1]);
+                status = parseInt(arrayMedidas[2]);
+                upDateStatus();
+                mensajeRecibido = true;
+            };
+            //Connect Options
+            var options = {
+                timeout: 3,
+                //Gets Called if the connection has sucessfully been established
+                onSuccess: function () {
+                   document.getElementById('JB4').style.color='#00e600';
+                },
+                //Gets Called if the connection could not be established
+                onFailure: function (message) {
+                   client.connect(options);
+                   setTimeout(function() {client.subscribe(subTopic, {qos: 2});},2000);
+                }
+            };
+            //Creates a new Messaging.Message Object and sends it to the HiveMQ MQTT Broker
+            var publish = function (payload, topic, qos) {
+                //Send your message (also possible to serialize it as JSON or protobuf or just use a string, no limitations)
+                var message = new Messaging.Message(payload);
+                message.destinationName = topic;
+                message.qos = qos;
+                client.send(message);
+            }
+            //Random string 
+            function randomString(length) {
+                var text = "";
+                var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+                for (var i = 0; i < length; i++)
+                    text += possible.charAt(Math.floor(Math.random() * possible.length));
+                return text;
+            }
+            
+
+            function tweet() {
+               publish('{"id" : ' + 1 + ', "power" : ' + power + ', "status" : ' + status + '}',tweetTopic,2);     
+            }
+			
+			/*function mouseUpOn(obj){
+				if(status==0){
+					obj.style.backgroundColor = "#222";
+				}else{
+					obj.style.backgroundColor = "#fed136";
+				}
+			}*/
+			
+			
+            function switchSP() {
+				//document.getElementById('JB5').style.background='#fec503';
+			   if(status == 0){
+					publish("1",pubTopic,2);
+			   }else{
+					publish("0",pubTopic,2);	
+			   }     
+            }
+
+            function upDateStatus(){
+                if(status > 0){
+                    document.getElementById('JB5').style.background='#fed136';
+                }else{
+                    document.getElementById('JB5').style.background='#222';
+                }
+            }       
+
+
+            //On DOM ready
+            $(function () {
+                setTimeout(function() {client.subscribe(subTopic, {qos: 2});},2000);
+                client.connect(options);
+
+                $(document).ready(function() {
+                    Highcharts.setOptions({
+                        global: {
+                            useUTC: false
+                        }
+                    });
+                
+                    var chart;
+                    $('#containerJB').highcharts({
+                        chart: {
+                            type: 'spline',
+                            animation: Highcharts.svg, // don't animate in old IE
+                            marginRight: 10,
+                            events: {
+                                load: function() {
+                
+                                    // set up the updating of the chart each second
+                                    var series = this.series[0];
+                                    setInterval(function() {
+                                        if(mensajeRecibido==true){
+                                            var x = (new Date()).getTime(), // current time
+                                                y = power;
+                                            series.addPoint([x, y], true, true);
+                                            mensajeRecibido=false;
+                                        }
+                                    }, 500);
+                                }
+                            }
+                        },
+                        title: {
+                            text: ''
+                        },
+                        xAxis: {
+                            type: 'datetime',
+                            tickPixelInterval: 150
+                        },
+                        yAxis: {
+                            title: {
+                                text: 'Wh'
+                            },
+                            plotLines: [{
+                                value: 0,
+                                width: 1,
+                                color: '#808080'
+                            }]
+                        },
+                        tooltip: {
+                            formatter: function() {
+                                    return '<b>'+ this.series.name +'</b><br/>'+
+                                    Highcharts.dateFormat('%Y-%m-%d %H:%M:%S', this.x) +'<br/>'+
+                                    Highcharts.numberFormat(this.y, 2)+"Wh";
+                            }
+                        },
+                        legend: {
+                            enabled: false
+                        },
+                        exporting: {
+                            enabled: false
+                        },
+                        series: [{
+                            name: 'E. Consumption',
+                            data: (function() {
+                                // generate an array of random data
+                                var data = [],
+                                    time = (new Date()).getTime(),
+                                    i;
+                
+                                for (i = -19; i <= 0; i++) { 
+                                    data.push({
+                                        x: time + i * 1000,
+                                        y: 0
+                                    });
+                                }
+                                return data;
+                            })()
+                        }]
+                    });
+                });
+                
+            });
+        </script>
+
+
     <script type="text/javascript">
 
-    function  scrollJB(linkTo){
-        $('html,body').animate({
-            scrollTop: $(linkTo).offset().top
-        },
-        'slow');
-    }
+        function  scrollJB(linkTo){
+            $('html,body').animate({
+                scrollTop: $(linkTo).offset().top
+            },
+            'slow');
+        }
+
+
 
     </script>
 
@@ -70,10 +257,10 @@
                         <a class="page-scroll" href="#services">Services</a>
                     </li>
                     <li>
-                        <a class="page-scroll" href="#portfolio">Energy</a>
+                        <a class="page-scroll" href="#portfolio">Costs</a>
                     </li>
                     <li>
-                        <a class="page-scroll" href="#about">Costs</a>
+                        <a class="page-scroll" href="#about">Energy</a>
                     </li>
                     <li>
                         <a class="page-scroll" href="#team">Action</a>
@@ -81,6 +268,10 @@
                     <li>
                         <a class="page-scroll" href="#contact">Team</a>
                     </li>
+                    <li>
+                        <i id="JB4" class="fa fa-circle fa-stack-1x text-primary" style="color:red"></i>
+                    </li>
+                    
                 </ul>
             </div>
             <!-- /.navbar-collapse -->
@@ -112,17 +303,17 @@
                 <div class="col-md-4">
                     <span class="fa-stack fa-4x">
                         <i id="JB1" class="fa fa-circle fa-stack-2x text-primary" onmouseover="document.getElementById('JB1').style.color='#fec503'" onmouseout="document.getElementById('JB1').style.color='#fed136'" style="cursor: pointer"></i>
-                        <i class="fa fa-area-chart fa-stack-1x fa-inverse" onclick="scrollJB('#portfolio')" onmouseover="document.getElementById('JB1').style.color='#fec503'" onmouseout="document.getElementById('JB1').style.color='#fed136'" style="cursor: pointer"></i>
+                        <i class="fa fa-dollar fa-stack-1x fa-inverse" onclick="scrollJB('#portfolio')" onmouseover="document.getElementById('JB1').style.color='#fec503'" onmouseout="document.getElementById('JB1').style.color='#fed136'" style="cursor: pointer"></i>
                     </span>
-                    <h4 class="service-heading">Energy Consumption</h4>
+                    <h4 class="service-heading">Energy Costs</h4>
                     <p class="text-muted">Lorem ipsum dolor sit amet, consectetur adipisicing elit. Minima maxime quam architecto quo inventore harum ex magni, dicta impedit.</p>
                 </div>
                 <div class="col-md-4">
                     <span class="fa-stack fa-4x">
                         <i id="JB2" class="fa fa-circle fa-stack-2x text-primary" onmouseover="document.getElementById('JB2').style.color='#fec503'" onmouseout="document.getElementById('JB2').style.color='#fed136'" style="cursor: pointer"></i>
-                        <i class="fa fa-dollar fa-stack-1x fa-inverse" onclick="scrollJB('#about')" onmouseover="document.getElementById('JB2').style.color='#fec503'" onmouseout="document.getElementById('JB2').style.color='#fed136'" style="cursor: pointer"></i>
+                        <i class="fa fa-area-chart fa-stack-1x fa-inverse" onclick="scrollJB('#about')" onmouseover="document.getElementById('JB2').style.color='#fec503'" onmouseout="document.getElementById('JB2').style.color='#fed136'" style="cursor: pointer"></i>
                     </span>
-                    <h4 class="service-heading">Energy Costs</h4>
+                    <h4 class="service-heading">Energy Consumption</h4>
                     <p class="text-muted">Lorem ipsum dolor sit amet, consectetur adipisicing elit. Minima maxime quam architecto quo inventore harum ex magni, dicta impedit.</p>
                 </div>
                 <div class="col-md-4">
@@ -142,7 +333,7 @@
         <div class="container">
             <div class="row">
                 <div class="col-lg-12 text-center">
-                    <h2 class="section-heading">Energy Consumption</h2>
+                    <h2 class="section-heading">Energy Costs</h2>
                     <h3 class="section-subheading text-muted">Lorem ipsum dolor sit amet consectetur.</h3>
                 </div>
             </div>
@@ -240,10 +431,25 @@
         <div class="container">
             <div class="row">
                 <div class="col-lg-12 text-center">
-                    <h2 class="section-heading">Energy Costs</h2>
+                    <h2 class="section-heading">Energy Consumption</h2>
                     <h3 class="section-subheading text-muted">Lorem ipsum dolor sit amet consectetur.</h3>
                 </div>
             </div>
+            <div id="containerJB" style="min-width: 310px; height: 400px; margin: 0 auto"></div>
+            
+
+
+
+
+
+
+            <!--
+            <div id = "btnContainer">
+                <input class = "btn" type="button" class="button" onClick = "buttonPressed()" value = "BEGIN"/>
+            <div>
+
+
+
             <div class="row">
                 <div class="col-lg-12">
                     <ul class="timeline">
@@ -312,7 +518,7 @@
                         </li>
                     </ul>
                 </div>
-            </div>
+            </div> -->
         </div>
     </section>
 
@@ -328,45 +534,45 @@
             <div class="row">
                 <div class="col-sm-4">
                     <div class="team-member">
-                        <img src="img/team/1.jpg" class="img-responsive img-circle" alt="">
-                        <h4>Juan Benavente</h4>
-                        <p class="text-muted">Lead Designer</p>
+                        <img src="img/team/11.jpg" class="img-responsive img-circle" alt="">
+                        <h4>Oven</h4>
+                        <p class="text-muted">Kitchen</p>
                         <ul class="list-inline social-buttons">
-                            <li><a href="#"><i class="fa fa-twitter"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-twitter"></i></a>
                             </li>
-                            <li><a href="#"><i class="fa fa-facebook"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-power-off"></i></a>
                             </li>
-                            <li><a href="#"><i class="fa fa-linkedin"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-download"></i></a>
                             </li>
                         </ul>
                     </div>
                 </div>
                 <div class="col-sm-4">
                     <div class="team-member">
-                        <img src="img/team/2.jpg" class="img-responsive img-circle" alt="">
-                        <h4>Larry Parker</h4>
-                        <p class="text-muted">Lead Marketer</p>
+                        <img src="img/team/12.jpg" class="img-responsive img-circle" alt="">
+                        <h4>Lamp</h4>
+                        <p class="text-muted">Living Room</p>
                         <ul class="list-inline social-buttons">
-                            <li><a href="#"><i class="fa fa-twitter"></i></a>
+                            <li><a onclick="tweet()" style="cursor:pointer"><i class="fa fa-twitter"></i></a>
                             </li>
-                            <li><a href="#"><i class="fa fa-facebook"></i></a>
+                            <li><a  id="JB5" onclick="switchSP()" style="cursor:pointer"><i class="fa fa-power-off"></i></a>
                             </li>
-                            <li><a href="#"><i class="fa fa-linkedin"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-download"></i></a>
                             </li>
                         </ul>
                     </div>
                 </div>
                 <div class="col-sm-4">
                     <div class="team-member">
-                        <img src="img/team/3.jpg" class="img-responsive img-circle" alt="">
-                        <h4>Diana Pertersen</h4>
-                        <p class="text-muted">Lead Developer</p>
+                        <img src="img/team/13.jpg" class="img-responsive img-circle" alt="">
+                        <h4>Dish Washer</h4>
+                        <p class="text-muted">Kitchen</p>
                         <ul class="list-inline social-buttons">
-                            <li><a href="#"><i class="fa fa-twitter"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-twitter"></i></a>
                             </li>
-                            <li><a href="#"><i class="fa fa-facebook"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-power-off"></i></a>
                             </li>
-                            <li><a href="#"><i class="fa fa-linkedin"></i></a>
+                            <li><a style="cursor:pointer"><i class="fa fa-download"></i></a>
                             </li>
                         </ul>
                     </div>
@@ -703,7 +909,7 @@
     </div>
 
     <!-- jQuery -->
-    <script src="js/jquery.js"></script>
+    
 
     <!-- Bootstrap Core JavaScript -->
     <script src="js/bootstrap.min.js"></script>
